@@ -1,0 +1,240 @@
+---
+title: "Building Recommender System"
+author: "Tubagus Hadi"
+date: "`r format(Sys.Date(), '%B %e, %Y')`"
+output: 
+  html_document:
+    toc: TRUE
+    toc_depth: 3
+    toc_float:
+      collapse: false
+    number_section: TRUE
+    css: style.css
+    theme: flatly
+    highlight: zenburn
+    pdf_document:
+     latex_engine: xelatex
+     fig_caption: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE,
+                      warning = FALSE,
+                      message = FALSE)
+```
+
+# **Pendahuluan**
+
+Recommender sistem atau Sistem Rekomendasi menurut info di Wikipedia adalah sistem penyaringan informasi yang berupaya memprediksi "peringkat" atau "preferensi" yang akan diberikan pengguna pada suatu barang. 
+Menurut **Baptiste Rocca** pada artikelnya di https://towardsdatascience.com/introduction-to-recommender-systems-6c66cf15ada menyampaikan bahwa tujuan dari recommender system adalah memberikan rekomendasi yang sesuai kepada pengguna aplikasi dan biasanya menggunakan dua metode yaitu collaborative filtering dan content based.
+Kali ini saya mencoba menyampaikan recommender system sederhana menggunakan **R** yang sebelumnya menggunakan **python** di project DQLab bersama mas **Karl Christian Business Intelligence Traveloka**.
+Menurut mas Karl Christian, ada 3 kegunaan Recommender System yaitu :
+
+1. **Mencegah Tindakan Curang atau Fraud** : Fraud adalah tindakan kecurangan yang biasanya ada pada
+                                         e-commerce. Pelanggan dapat menyalah gunakan promo untuk                                           kepentingan pribadi. Sehingga secara tidak langsung dapat                                          merekomendasikan kita mana user yang kemungkinan melakukan                                          fraud dan tidak.
+                                         
+2. **Memberikan rekomendasi konten** : Misalnya pada youtube dapat memberikan rekomendasi kepada                                          pengguna youtube, video apa yang sebaiknya ditonton dengan                                         mengevaluasi historical viewed by user.
+
+3. **Diperlukan untuk search engine** : Mengumpulkan sekaligus mengorganisir berbagai informasi di                                         internet dilihat dari kebutuhan para pengguna.
+
+# **Data Preparation**
+
+Seperti biasa sebelum memulai kita perlu melakukan data preparation dan melihat struktur dari data tersebut
+
+## **Load Package**
+
+```{r}
+library(readr) # membaca file
+library(tidyverse) # mengolah dan merapihkan data
+library(DT) # menampilkan data berbentuk table
+```
+
+## **Reading Files**
+
+```{r}
+movie_df <- read_tsv("title.basics.tsv")
+rating_df <- read_tsv("title.ratings.tsv")
+```
+
+
+**Melihat Struktur Data**
+
+
+```{r}
+glimpse(movie_df) # menampilkan struktur data
+```
+
+**Cek Column Names**
+
+
+```{r}
+names(movie_df) # melihat nama column
+```
+
+
+## **Handling Missing Values**
+
+**Cek Missing Values**
+
+
+```{r}
+movie_df %>%
+  summarise_all((~(sum(is.na(.)))))
+```
+
+
+**Drop Missing Values dan cek struktur Data**
+
+
+```{r}
+movie_df_NoNa <- na.omit(movie_df)
+
+glimpse(movie_df_NoNa)
+
+
+```
+
+
+**Cek Missing Values dan Ubah Tipe Data**
+
+
+```{r}
+movie_df_NoNa %>%
+  summarise_all((~(sum(is.na(.)))))
+```
+
+
+```{r}
+movie_df_fix <- movie_df_NoNa %>%              # mengubah tipe data
+  mutate_all(~replace(., . =="\\N", "nan"))%>%
+  mutate(titleType = as.factor(titleType),
+         isAdult = as.factor(isAdult),
+         startYear = as.numeric(startYear),
+         endYear = as.numeric(endYear),
+         runtimeMinutes = as.numeric(runtimeMinutes))
+
+glimpse(movie_df_fix)
+```
+
+
+**Menampilkan 6 data Teratas**
+
+
+```{r}
+datatable(head(movie_df_fix),
+          extensions = 'Scroller', options = list(
+  deferRender = TRUE,
+  scrollY = 200,
+  scroller = TRUE
+))
+
+```
+
+
+**Inner Join Dataset**
+
+
+```{r}
+movie_rating_df <- inner_join(movie_df_fix,rating_df)
+
+datatable(print(movie_rating_df),
+          extensions = 'Scroller', options = list(
+  deferRender = TRUE,
+  scrollY = 200,
+  scroller = TRUE
+))
+```
+
+
+**Cek Missing Value**
+
+
+```{r}
+movie_rating_df %>%
+  summarise_all((~(sum(is.na(.)))))
+
+```
+
+
+**Drop Missing Values**
+
+
+```{r}
+movie_rating_df <- movie_rating_df[!is.na(movie_rating_df$runtimeMinutes),]
+```
+
+
+**Order berdasarkan averageRating**
+
+
+```{r}
+movie_rating_df %>%
+  arrange(desc(averageRating))%>%
+  head(10)
+```
+
+
+# **Formula IMDB Recommender System**
+
+
+```{r}
+ 
+
+  v <- movie_rating_df$numVotes
+  R <- movie_rating_df$averageRating
+  C <- mean(movie_rating_df$averageRating)
+  m <- quantile(movie_rating_df$numVotes,0.8)
+
+
+movie_rating_df <- movie_rating_df %>%
+  mutate(score = (v/(m+v))*R+(m/(m+v))*C)
+```
+
+
+**Order Berdasarkan score**
+
+
+```{r}
+movie_rating_df %>%
+  arrange(desc(score))%>%
+  head(100)
+```
+
+
+**Rekomendasi berdasarkan user preference** 
+
+Terakhir kita menampilkan data berdasarkan dua preferensi yaitu berdasarkan jenis film **adult** diwakili dengan angka **1** dan **tidak adult** dengan angka **0** serta filter berdasarkan tahun.
+
+
+```{r}
+
+df <- movie_rating_df
+
+recom <- function(df,ask_adult, ask_start_year,top){
+  if(ask_adult =='yes'){
+    df = df%>%
+      filter(isAdult == 1)
+  }else{
+    df <- df%>%
+      filter(isAdult == 0)
+  }
+  df = df%>%
+    filter(startYear >= ask_start_year)
+  {
+      top <- head(df,200)
+    }
+  
+  }
+
+
+datatable(print(recom(df,
+            ask_adult = 'no',
+            ask_start_year = 2000,
+            top),
+           extensions = 'Scroller', options = list(
+  deferRender = TRUE,
+  scrollY = 200,
+  scroller = TRUE
+)))
+
+```
